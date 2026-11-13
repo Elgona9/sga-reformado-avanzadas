@@ -1,0 +1,15 @@
+# Maven / Java
+target/
+*.class
+*.jar
+.mvn/wrapper/maven-wrapper.jar
+
+# Credenciales reales (se sube solo application-example.properties)
+api/src/main/resources/application.properties
+
+# Editores y sistema
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
