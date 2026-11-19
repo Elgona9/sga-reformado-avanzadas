@@ -9,8 +9,8 @@
 --      + auditoría de cambio de estado de grupo (RNF-05)
 --      + reglas nuevas del esquema de evaluación (RN-28 a RN-31)
 --   B. Casos de uso: RF-09 inscribir, RF-06 crear grupo, RF-03 autenticar,
---      RF-17 reporte de rendimiento ponderado, definir esquema de evaluación
---      y vista de notas definitivas
+--      RF-17 reporte de rendimiento ponderado y definir esquema de evaluación
+--      (la vista vw_definitiva_inscripcion que usa RF-17 está en 04_vistas.sql)
 --
 -- Convención de auditoría: la aplicación ejecuta, al abrir la sesión de base
 -- de datos de cada usuario,  SET app.id_usuario = '<id_usuario>';  y la
@@ -742,28 +742,6 @@ BEGIN
     SELECT u.id_usuario, v_user.nombre_completo, v_user.rol, u.ultimo_acceso
     FROM usuario u WHERE u.id_usuario = v_user.id_usuario;
 END $$;
-
--- ---------------------------------------------------------------------
--- Notas definitivas ponderadas por inscripción
---   porcentaje_evaluado : suma de los porcentajes de las evaluaciones ya calificadas
---   nota_acumulada      : suma de nota × porcentaje / 100 (puntos ya ganados)
---   promedio_ponderado  : nota_acumulada / porcentaje_evaluado (nota de lo evaluado hasta hoy)
---   definitiva          : nota_acumulada, solo cuando ya se evaluó el 100 % del esquema
--- ---------------------------------------------------------------------
-CREATE OR REPLACE VIEW vw_definitiva_inscripcion AS
-SELECT i.id_inscripcion, i.id_estudiante, i.id_grupo,
-       COALESCE(SUM(e.porcentaje) FILTER (WHERE c.id_calificacion IS NOT NULL), 0)  AS porcentaje_evaluado,
-       ROUND(COALESCE(SUM(c.nota * e.porcentaje / 100), 0), 2)                      AS nota_acumulada,
-       ROUND(SUM(c.nota * e.porcentaje)
-             / NULLIF(SUM(e.porcentaje) FILTER (WHERE c.id_calificacion IS NOT NULL), 0), 2) AS promedio_ponderado,
-       CASE WHEN SUM(e.porcentaje) FILTER (WHERE c.id_calificacion IS NOT NULL) = 100
-            THEN ROUND(SUM(c.nota * e.porcentaje / 100), 2) END                      AS definitiva
-FROM inscripcion i
-JOIN esquema_evaluacion e ON e.id_grupo = i.id_grupo
-LEFT JOIN calificacion c  ON c.id_inscripcion = i.id_inscripcion
-                         AND c.id_tipo_evaluacion = e.id_tipo_evaluacion
-WHERE i.estado = 'Inscrito'
-GROUP BY i.id_inscripcion, i.id_estudiante, i.id_grupo;
 
 -- ---------------------------------------------------------------------
 -- RF-17 · Reporte de rendimiento de una asignatura propia del docente
