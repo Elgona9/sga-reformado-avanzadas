@@ -1,7 +1,10 @@
 package co.edu.udistrital.sga.repository;
 
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -9,7 +12,10 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import tools.jackson.databind.ObjectMapper;
+
 import co.edu.udistrital.sga.model.Grupo;
+import co.edu.udistrital.sga.model.GrupoNuevo;
 import co.edu.udistrital.sga.model.GrupoResumen;
 import co.edu.udistrital.sga.model.HorarioGrupo;
 
@@ -65,10 +71,17 @@ public class GrupoRepository {
             rs.getObject("fecha_inicio_inscripcion", java.time.LocalDate.class),
             rs.getObject("fecha_fin_inscripcion", java.time.LocalDate.class));
 
-    private final JdbcTemplate jdbc;
+    // Las horas se envían al procedimiento como texto "HH:mm" dentro del JSON.
+    private static final DateTimeFormatter HORA = DateTimeFormatter.ofPattern("HH:mm");
 
-    public GrupoRepository(JdbcTemplate jdbc) {
+    private final JdbcTemplate jdbc;
+    // ObjectMapper de Jackson 3 (paquete tools.jackson), autoconfigurado por
+    // Spring Boot: se usa para construir el JSON de horarios sin concatenar texto.
+    private final ObjectMapper json;
+
+    public GrupoRepository(JdbcTemplate jdbc, ObjectMapper json) {
         this.jdbc = jdbc;
+        this.json = json;
     }
 
     /**
@@ -137,6 +150,37 @@ public class GrupoRepository {
     public boolean existe(int id) {
         Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM grupo WHERE id_grupo = ?", Integer.class, id);
         return n != null && n > 0;
+    }
+
+    /**
+     * Crea un grupo mediante el procedimiento pr_crear_grupo, que valida los datos
+     * (RAISE EXCEPTION -> 400), calcula el número consecutivo y audita la acción.
+     * Los triggers RN-15 y RN-16 rechazan horarios que choquen. @Transactional para
+     * que todo (grupo + horarios + bitácora) revierta junto si falla. El id vuelve
+     * por el parámetro INOUT p_id_grupo, que el CALL devuelve como fila.
+     *
+     * @return id del grupo creado.
+     */
+    @Transactional
+    public int crear(GrupoNuevo g) {
+        // La API recibe diaSemana/horaInicio/horaFin; el procedimiento espera las
+        // claves "dia", "inicio" y "fin" con la hora en formato "HH:mm".
+        List<Map<String, Object>> horarios = new ArrayList<>();
+        for (HorarioGrupo h : g.horarios()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("dia", h.diaSemana());
+            m.put("inicio", h.horaInicio().format(HORA));
+            m.put("fin", h.horaFin().format(HORA));
+            horarios.add(m);
+        }
+        String horariosJson = json.writeValueAsString(horarios);
+
+        Integer id = jdbc.queryForObject(
+                "CALL pr_crear_grupo(?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, CAST(NULL AS INT))",
+                Integer.class,
+                g.idDecano(), g.idAsignatura(), g.idDocente(), g.idPeriodo(), g.idEspacio(),
+                g.cupoMaximo(), g.fechaInicioInscripcion(), g.fechaFinInscripcion(), horariosJson);
+        return id;
     }
 
     /**
